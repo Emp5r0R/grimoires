@@ -5,4 +5,4 @@
 
 ### Caution
 
-Use the code or snippets from here for ethical purpose only. You are responsible for whatever you do. 
+Use the code or snippets from here only for ethical purposes. You are responsible for whatever you do. 
