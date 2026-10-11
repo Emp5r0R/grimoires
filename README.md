@@ -6,7 +6,7 @@
 ### Tools
 
 - [github-email-scanAndScrub](github-email-scanAndScrub) - scan and scrub leaked emails from Git history
-- [anon-media-uploader](anon-media-uploader) - upload media through free proxies, save hashes, check links
+- [anon-media-uploader](anon-media-uploader) - upload images/files through free proxies, save hashes and links, check them later
 
 ### Caution
 

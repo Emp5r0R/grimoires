@@ -1,74 +1,86 @@
 # Anon Media Uploader
 
-Upload images/media to free hosts through rotating free proxies, save the hashes of every upload per host, and check later if the links are still alive.
+Upload images and files to free hosts through rotating free proxies, save the hashes and links of every upload, and check later if they are still alive.
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Emp5r0R/grimoires/main/anon-media-uploader/install.sh | bash
+```
+
+Installs the script and its modules (`aiohttp`, `aiohttp-socks`, `Pillow`) and adds the `media-drop` command.
+
+Manual: `pip install -r requirements.txt` then `python media_drop.py ...`
 
 ## Features
 
-- 16 hosts: catbox, imgbb, freeimage, pixhost, img.in.th, pomf.lain.la, qu.ax, x0.at, 0x0.st, lensdump, imgur (key), litterbox, uguu, tmpfiles, temp.sh, filebin
-- Free proxies from ~30 public lists, validated before use (TLS always verified, IP-leak check)
-- Tor and your own proxies supported
-- Failover between hosts, or mirror one file to many hosts
-- Hash manifest (MD5 / SHA-1 / SHA-256 / dHash) per host
+- Images: catbox, imgbb, freeimage, pixhost, img.in.th, lensdump, imgur (key)
+- Files: catbox, pomf.lain.la, qu.ax, gofile, 0x0.st, x0.at, paste.c-net.org, pixeldrain (key), litterbox, temp.sh, tmpfile.link, filebin, uguu, tmpfiles
+- Hosts picked by file size and how long you want it kept (permanent / temporary / min-max life)
+- Free proxies from ~30 public lists, validated before use (TLS always verified, IP-leak check), or Tor / your own proxy
+- Optional hash change that keeps the file valid, and `restore` to get the original back
+- Hash manifest (MD5 / SHA-1 / SHA-256 / dHash) per host, and a plain links file
 - Link checker: intact, re-encoded, changed, removed, expired
-- Optional EXIF/GPS stripping, random filenames
-
-## Requirements
-
-- Python 3.9+
-- `aiohttp`
-- `aiohttp-socks` (optional, SOCKS/Tor)
-- `Pillow` (optional, `--strip-metadata` and dHash)
-
-```bash
-pip install aiohttp aiohttp-socks Pillow
-```
 
 ## Usage
 
-### Upload
+### Images
 
 ```bash
-python media_drop.py upload image.jpg
+media-drop upload image.jpg
+media-drop upload image.jpg --all --save-hashes
 ```
 
-Prints the URL. Tries hosts in order until one works.
-
-### Upload to every host and save hashes
+### Files
 
 ```bash
-python media_drop.py upload image.jpg --all --save-hashes
+media-drop file backup.zip                    # 3 hosts, prints all links
+media-drop file backup.zip --save-links       # also save links to links.txt
+media-drop file big.iso --keep temp           # temporary hosts only
+media-drop file doc.pdf --keep perm --min-life 30d
 ```
 
-Hashes and links go to `media_hashes.json` (or pass your own file: `--save-hashes my.json`).
-
-### Check if uploads are still there
+### Change the hash
 
 ```bash
-python media_drop.py check
-python media_drop.py check --manifest my.json
+media-drop file doc.pdf --change-hash safe --save-hashes
+media-drop file doc.pdf --change-hash safe --unique-per-host
 ```
 
-Check a single link:
+- `none` upload as-is (default)
+- `safe` hidden marker the format allows (file still opens normally)
+- `append` marker at the end of any file
+- `wrap` original file inside a zip
+
+Undo it on a downloaded copy:
 
 ```bash
-python media_drop.py check https://files.catbox.moe/abc.jpg --expect-sha256 HASH
+media-drop restore downloaded.pdf
 ```
 
-### Other commands
+### Check uploads
 
 ```bash
-python media_drop.py list --csv          # export manifest
-python media_drop.py hosts               # supported hosts
-python media_drop.py proxies --export proxies.txt
+media-drop check
+media-drop check --manifest my.json
+media-drop check https://files.catbox.moe/abc.jpg --expect-sha256 HASH
+```
+
+### Other
+
+```bash
+media-drop list --csv                 # export hashes and links
+media-drop hosts                      # hosts, limits and retention
+media-drop proxies --export proxies.txt
 ```
 
 ### Useful options
 
 ```bash
---hosts catbox,imgbb       # pick hosts (or: permanent, temporary, images, all)
---mirror 3                 # upload to 3 hosts
---strip-metadata           # remove EXIF/GPS first
+--hosts catbox,gofile      # pick hosts (or groups: permanent, temporary, images, files, all)
+--mirror 3 / --all         # number of hosts per file
 --expire 1d                # auto delete where supported
+--strip-metadata           # remove EXIF/GPS from images
 --tor                      # use Tor instead of free proxies
 --proxy socks5://ip:port   # use your own proxy
 --direct                   # no proxy
@@ -77,9 +89,8 @@ python media_drop.py proxies --export proxies.txt
 ## Help
 
 ```bash
-python media_drop.py --help
-python media_drop.py upload --help
-python media_drop.py check --help
+media-drop --help
+media-drop file --help
 ```
 
 ## Note
