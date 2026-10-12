@@ -94,16 +94,16 @@ setup_python() {
     PY="$dest/venv/bin/python"
     VENV_BIN="$dest/venv/bin"
     say "installing python modules into $dest/venv"
-    $SUDO "$PY" -m pip install -q --disable-pip-version-check --upgrade pip >/dev/null 2>&1 || true
+    $SUDO "$PY" -m pip install -q --no-cache-dir --disable-pip-version-check --upgrade pip >/dev/null 2>&1 || true
     if [ -f "$req" ]; then
-      $SUDO "$PY" -m pip install -q --disable-pip-version-check --upgrade -r "$req"
+      $SUDO "$PY" -m pip install -q --no-cache-dir --disable-pip-version-check --upgrade -r "$req"
     fi
   else
     warn "python3 venv not available (install python3-venv for an isolated setup); using pip --user"
     PY="$(command -v python3)"
     if [ -f "$req" ]; then
-      "$PY" -m pip install -q --user -r "$req" 2>/dev/null \
-        || "$PY" -m pip install -q --user --break-system-packages -r "$req"
+      "$PY" -m pip install -q --no-cache-dir --user -r "$req" 2>/dev/null \
+        || "$PY" -m pip install -q --no-cache-dir --user --break-system-packages -r "$req"
     fi
   fi
 }

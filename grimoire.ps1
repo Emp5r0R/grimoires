@@ -128,10 +128,10 @@ function Initialize-Python($tool, [string]$dest) {
     $venvBin = if ($OnWindows) { Join-Path $venv 'Scripts' } else { Join-Path $venv 'bin' }
     $venvPy = if ($OnWindows) { Join-Path $venvBin 'python.exe' } else { Join-Path $venvBin 'python' }
     Say "installing python modules into $venv"
-    & $venvPy -m pip install -q --disable-pip-version-check --upgrade pip 2>$null | Out-Null
+    & $venvPy -m pip install -q --no-cache-dir --disable-pip-version-check --upgrade pip 2>$null | Out-Null
     $req = Join-Path (Join-Path $dest 'app') $tool.Req
     if (Test-Path $req) {
-        & $venvPy -m pip install -q --disable-pip-version-check --upgrade -r $req
+        & $venvPy -m pip install -q --no-cache-dir --disable-pip-version-check --upgrade -r $req
         if ($LASTEXITCODE -ne 0) { Fail 'pip install failed' }
     }
     return @{ Py = $venvPy; VenvBin = $venvBin }
