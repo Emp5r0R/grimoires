@@ -11,6 +11,29 @@ A small CLI tool to scan GitHub/Git history for exposed email addresses and safe
 - Protected branch, rate-limit, network, and partial-push handling
 - JSON reports
 
+## Run without installing
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Emp5r0R/grimoires/main/grimoire.sh | bash -s -- run email-guard scan --account USERNAME
+```
+
+Downloads the script and its modules into a temp folder, runs it in your current folder and removes everything afterwards.
+
+Windows: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Emp5r0R/grimoires/main/grimoire.ps1))) run email-guard scan --account USERNAME`
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Emp5r0R/grimoires/main/grimoire.sh | bash -s -- install email-guard            # local (~/.local/bin)
+curl -fsSL https://raw.githubusercontent.com/Emp5r0R/grimoires/main/grimoire.sh | bash -s -- install email-guard --system   # /usr/local/bin
+email-guard self-update
+email-guard self-uninstall
+```
+
+Windows: `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Emp5r0R/grimoires/main/grimoire.ps1))) install email-guard`
+
+Installs the script with `aiohttp` and `git-filter-repo` in its own virtualenv and adds the `email-guard` command (Git must already be installed).
+
 ## Requirements
 
 - Python 3.9+
@@ -21,7 +44,7 @@ A small CLI tool to scan GitHub/Git history for exposed email addresses and safe
 Install Python dependency:
 
 ```bash
-pip install aiohttp git-filter-repo
+pip install -r requirements.txt
 ```
 
 ## Usage

@@ -53,20 +53,22 @@ async def run_upload(args: argparse.Namespace, engine: Engine, kind: str) -> int
         ok, why = h.available()
         if not ok and explicit:
             log.warning("%s skipped: %s", h.name, why)
+    hash_mode = "none" if args.keep_hash else (args.change_hash or ("auto" if media_only else "none"))
+    unique = args.unique_per_host if args.unique_per_host is not None else (media_only and hash_mode != "none")
+    if unique and hash_mode == "none":
+        raise ToolError("--unique-per-host needs a hash change (drop --keep-hash or pass --change-hash auto|safe|append|wrap)")
     opts = UploadOptions(expire=args.expire, nsfw=getattr(args, "nsfw", False), secret_urls=args.secret_urls)
     policy = RetentionPolicy(keep=getattr(args, "keep", "any"), min_life=getattr(args, "min_life", None), max_life=getattr(args, "max_life", None))
     selector = HostSelector(hosts, policy, opts, sort_by_life=not media_only and not explicit)
     manifest = Manifest(Path(args.save_hashes)) if args.save_hashes else None
     links = LinkWriter(Path(args.save_links)) if args.save_links else None
     settings = UploadSettings(
-        kind=kind, mirrors=args.mirror, all_hosts=args.all, opts=opts, hash_mode=args.change_hash,
-        unique_per_host=args.unique_per_host, strip=getattr(args, "strip_metadata", False), keep_name=args.keep_name,
+        kind=kind, mirrors=args.mirror, all_hosts=args.all, opts=opts, hash_mode=hash_mode,
+        unique_per_host=unique, strip=getattr(args, "strip_metadata", False), keep_name=args.keep_name,
         verify=(bool(manifest) and not args.no_verify) or args.verify, force=args.force,
         max_download=args.max_download * MiB, dh_threshold=args.dhash_threshold, concurrency=args.concurrency,
         quiet_stdout=args.json,
     )
-    if args.unique_per_host and args.change_hash == "none":
-        raise ToolError("--unique-per-host needs --change-hash safe|append|wrap")
     service = UploadService(engine, selector, settings, manifest, links)
     try:
         results, failures = await service.run(paths)
@@ -326,8 +328,12 @@ def _upload_parent() -> argparse.ArgumentParser:
     g.add_argument("--all", action="store_true", help="upload to every matching host")
     g.add_argument("--save-hashes", nargs="?", const=DEFAULT_MANIFEST, metavar="FILE", help=f"record hashes + links per host (default {DEFAULT_MANIFEST})")
     g.add_argument("--save-links", nargs="?", const="links.txt", metavar="FILE", help="append the links to a text file (default links.txt)")
-    g.add_argument("--change-hash", choices=rehash.MODES, default="none", help="none (default): as-is; safe: format-aware marker; append: trailing marker; wrap: inside a zip")
-    g.add_argument("--unique-per-host", action="store_true", help="with --change-hash: a different hash on every host")
+    g.add_argument("--change-hash", choices=rehash.MODES, default=None,
+                   help="upload: auto (default) | file: none (default). auto/safe: hidden in-format marker "
+                        "(safe zips formats it cannot mark); append: trailing marker; wrap: inside a zip; none: as-is")
+    g.add_argument("--keep-hash", action="store_true", help="upload the original bytes (same as --change-hash none)")
+    g.add_argument("--unique-per-host", action=argparse.BooleanOptionalAction, default=None,
+                   help="a different hash (and name) on every host; default on for `upload`, off for `file`")
     g.add_argument("--verify", action="store_true", help="re-download after upload and compare hashes (default with --save-hashes)")
     g.add_argument("--no-verify", action="store_true", help="with --save-hashes: skip the re-download check")
     g.add_argument("--force", action="store_true", help="re-upload even if the manifest has a live copy on that host")
@@ -348,7 +354,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Upload images and files to free hosts through rotating free proxies, save hashes, and check links later.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="examples:\n"
-        "  media_drop.py upload cat.jpg --all --save-hashes\n"
+        "  media_drop.py upload cat.jpg --all --save-hashes      # new hash on every host\n"
+        "  media_drop.py upload cat.jpg --keep-hash             # original bytes\n"
         "  media_drop.py file backup.zip --mirror 3 --save-links\n"
         "  media_drop.py file big.iso --keep temp --change-hash safe --unique-per-host --save-hashes\n"
         "  media_drop.py file notes.pdf --keep perm --min-life 30d\n"

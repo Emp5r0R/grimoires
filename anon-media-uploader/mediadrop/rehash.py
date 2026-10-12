@@ -2,6 +2,9 @@
 
 Modes
   none    upload the bytes as they are
+  auto    like `safe`, but never wraps: formats without an in-format marker
+          are uploaded unchanged (default for pictures, so image hosts never
+          receive a zip)
   safe    embed a random marker where the format allows it (JPEG comment,
           PNG private chunk, GIF comment, RIFF chunk, PDF comment, ZIP comment,
           empty gzip member, MP4 'free' box, Matroska Void, XML/HTML comment,
@@ -38,7 +41,7 @@ except ImportError:
 
 log = logging.getLogger("media_drop")
 
-MODES = ("none", "safe", "append", "wrap")
+MODES = ("none", "auto", "safe", "append", "wrap")
 MARK_PREFIX = b"MDROP1:"
 WRAP_PREFIX = b"MDROPW1:"
 TOKEN_RE = rb"[0-9a-f]{16}"
@@ -537,14 +540,17 @@ def change_hash(data: bytes, mime: str, name: str, mode: str) -> Optional[HashCh
         return None
     marker = new_marker()
     token = marker.decode()
-    if mode == "safe":
+    if mode in ("safe", "auto"):
         for s in SAFE_STRATEGIES:
             if not s.match(data, mime, name):
                 continue
             out = s.embed(data, marker)
             if _verified(s, data, out):
-                return HashChange("safe", s.name, token, out)
+                return HashChange(mode, s.name, token, out)
             log.debug("%s: %s produced an invalid result, trying next", name, s.name)
+        if mode == "auto":
+            log.warning("%s: no safe in-format marker for %s, uploading with its original hash", name, mime)
+            return None
         log.info("%s: no safe in-format marker for %s, wrapping in a zip instead", name, mime)
         mode = "wrap"
     if mode == "append":
