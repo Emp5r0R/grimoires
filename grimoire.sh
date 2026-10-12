@@ -5,8 +5,8 @@
 #
 # Commands
 #   install   <tool> [--system | --dir DIR] [--bin DIR] [--ref REF] [--force]
-#   update    <tool|all> [--ref REF]
-#   uninstall <tool|all> [--purge]          (alias: remove)
+#   update    <tool|all> [--system|--local] [--ref REF]
+#   uninstall <tool|all> [--system|--local] [--purge]   (alias: remove)
 #   run       <tool> [tool arguments...]    download -> run -> delete everything
 #   list
 #
@@ -109,15 +109,18 @@ setup_python() {
 }
 
 write_launcher() {
-  local bin="$1" dest="$2" path_line=""
+  local bin="$1" dest="$2" path_line="" scope_flag
+  scope_flag="--dir \"$(dirname "$2")\""
+  if [ "$dest" = "$SYSTEM_ROOT/$T_NAME" ]; then scope_flag="--system"; fi
+  if [ "$dest" = "$LOCAL_ROOT/$T_NAME" ]; then scope_flag="--local"; fi
   if [ -n "$VENV_BIN" ]; then path_line="PATH=\"$VENV_BIN:\$PATH\"; export PATH"; fi
   $SUDO mkdir -p "$bin"
   $SUDO tee "$bin/$T_NAME" >/dev/null <<EOF
 #!/bin/sh
 # $LAUNCHER_TAG for $T_NAME ($dest)
 case "\${1:-}" in
-  self-update) shift; exec bash "$dest/grimoire.sh" update $T_NAME "\$@" ;;
-  self-uninstall|self-remove) shift; exec bash "$dest/grimoire.sh" uninstall $T_NAME "\$@" ;;
+  self-update) shift; exec bash "$dest/grimoire.sh" update $T_NAME $scope_flag "\$@" ;;
+  self-uninstall|self-remove) shift; exec bash "$dest/grimoire.sh" uninstall $T_NAME $scope_flag "\$@" ;;
 esac
 $path_line
 exec "$PY" "$dest/app/$T_ENTRY" "\$@"
@@ -140,13 +143,27 @@ EOF
 
 meta_get() { sed -n "s/^$2=//p" "$1/.grimoire" 2>/dev/null | head -n1; }
 
-# find_install TOOL -> sets DEST, or returns 1
-find_install() {
+# all_installs -> prints every install dir of T_NAME (custom, local, system)
+all_installs() {
   local d
   for d in "${CUSTOM_DIR:+$CUSTOM_DIR/$T_NAME}" "$LOCAL_ROOT/$T_NAME" "$SYSTEM_ROOT/$T_NAME"; do
-    [ -n "$d" ] && [ -f "$d/.grimoire" ] && { DEST="$d"; return 0; }
+    if [ -n "$d" ] && [ -f "$d/.grimoire" ]; then echo "$d"; fi
   done
-  return 1
+}
+
+# find_install -> sets DEST (honours WANT_SCOPE=local|system), or returns 1
+find_install() {
+  local d found=""
+  case "${WANT_SCOPE:-}" in
+    local) [ -f "$LOCAL_ROOT/$T_NAME/.grimoire" ] && found="$LOCAL_ROOT/$T_NAME" ;;
+    system) [ -f "$SYSTEM_ROOT/$T_NAME/.grimoire" ] && found="$SYSTEM_ROOT/$T_NAME" ;;
+    *)
+      for d in $(all_installs); do
+        if [ -z "$found" ]; then found="$d"; else warn "$T_NAME is also installed in $d (use --system or --local to pick)"; fi
+      done ;;
+  esac
+  [ -n "$found" ] || return 1
+  DEST="$found"
 }
 
 use_sudo_for() {
@@ -209,6 +226,8 @@ cmd_update() {
     case "$1" in
       --ref) ref="${2:?--ref needs a value}"; shift ;;
       --dir) CUSTOM_DIR="${2:?}"; shift ;;
+      --system) WANT_SCOPE="system" ;;
+      --local) WANT_SCOPE="local" ;;
       *) die "unknown option $1" ;;
     esac
     shift
@@ -217,7 +236,12 @@ cmd_update() {
     local t any=0
     for t in $TOOLS; do
       load_tool "$t"
-      if find_install; then any=1; cmd_update "$t" ${ref:+--ref "$ref"}; fi
+      local d
+      for d in $(all_installs); do
+        any=1
+        if [ "$d" = "$SYSTEM_ROOT/$t" ]; then WANT_SCOPE=system; else WANT_SCOPE=local; fi
+        cmd_update "$t" ${ref:+--ref "$ref"}
+      done
     done
     [ "$any" -eq 1 ] || warn "nothing installed"
     return 0
@@ -244,6 +268,8 @@ cmd_uninstall() {
     case "$1" in
       --purge) purge=1 ;;
       --dir) CUSTOM_DIR="${2:?}"; shift ;;
+      --system) WANT_SCOPE="system" ;;
+      --local) WANT_SCOPE="local" ;;
       *) die "unknown option $1" ;;
     esac
     shift
@@ -255,6 +281,7 @@ cmd_uninstall() {
       if find_install; then
         if [ "$purge" -eq 1 ]; then cmd_uninstall "$t" --purge; else cmd_uninstall "$t"; fi
       fi
+      WANT_SCOPE=""
     done
     return 0
   fi
@@ -301,18 +328,19 @@ cmd_list() {
   printf '%-12s %-28s %s\n' "tool" "folder" "installed" >&2
   for t in $TOOLS; do
     load_tool "$t"
-    if find_install; then
-      printf '%-12s %-28s %s (%s)\n' "$T_NAME" "$T_DIR" "$DEST" "$(meta_get "$DEST" ref)"
-    else
-      printf '%-12s %-28s %s\n' "$T_NAME" "$T_DIR" "-"
-    fi
+    local d shown=0
+    for d in $(all_installs); do
+      printf '%-12s %-28s %s (%s, %s)\n' "$T_NAME" "$T_DIR" "$d" "$(meta_get "$d" scope)" "$(meta_get "$d" ref)"
+      shown=1
+    done
+    [ "$shown" -eq 1 ] || printf '%-12s %-28s %s\n' "$T_NAME" "$T_DIR" "-"
   done
 }
 
 main() {
   # When piped from curl, give the tool the terminal instead of the script pipe.
   if [ ! -t 0 ] && (exec </dev/tty) 2>/dev/null; then exec </dev/tty; fi
-  SUDO="" CUSTOM_DIR=""
+  SUDO="" CUSTOM_DIR="" WANT_SCOPE=""
   local cmd="${1:-}"
   shift || true
   case "$cmd" in

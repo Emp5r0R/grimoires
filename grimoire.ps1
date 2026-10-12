@@ -5,8 +5,8 @@
 #
 # Commands
 #   install   <tool> [--system | --dir DIR] [--ref REF] [--force]
-#   update    <tool|all> [--ref REF]
-#   uninstall <tool|all> [--purge]          (alias: remove)
+#   update    <tool|all> [--system|--local] [--ref REF]
+#   uninstall <tool|all> [--system|--local] [--purge]   (alias: remove)
 #   run       <tool> [tool arguments...]    download -> run -> delete everything
 #   list
 #
@@ -137,8 +137,9 @@ function Initialize-Python($tool, [string]$dest) {
     return @{ Py = $venvPy; VenvBin = $venvBin }
 }
 
-function Write-Launcher($tool, [string]$bin, [string]$dest, $env_) {
+function Write-Launcher($tool, [string]$bin, [string]$dest, $env_, [string]$scope) {
     New-Item -ItemType Directory -Path $bin -Force | Out-Null
+    $scopeFlag = if ($scope -eq 'custom') { "--dir `"$(Split-Path $dest -Parent)`"" } else { "--$scope" }
     $entry = Join-Path (Join-Path $dest 'app') $tool.Entry
     $helper = Join-Path $dest 'grimoire.ps1'
     if ($OnWindows) {
@@ -146,8 +147,8 @@ function Write-Launcher($tool, [string]$bin, [string]$dest, $env_) {
         $text = @"
 @echo off
 rem $LauncherTag for $($tool.Name) ($dest)
-if /i "%~1"=="self-update" ( powershell -NoProfile -ExecutionPolicy Bypass -File "$helper" update $($tool.Name) & exit /b %errorlevel% )
-if /i "%~1"=="self-uninstall" ( powershell -NoProfile -ExecutionPolicy Bypass -File "$helper" uninstall $($tool.Name) & exit /b %errorlevel% )
+if /i "%~1"=="self-update" ( powershell -NoProfile -ExecutionPolicy Bypass -File "$helper" update $($tool.Name) $scopeFlag & exit /b %errorlevel% )
+if /i "%~1"=="self-uninstall" ( powershell -NoProfile -ExecutionPolicy Bypass -File "$helper" uninstall $($tool.Name) $scopeFlag & exit /b %errorlevel% )
 set "PATH=$($env_.VenvBin);%PATH%"
 "$($env_.Py)" "$entry" %*
 "@
@@ -158,8 +159,8 @@ set "PATH=$($env_.VenvBin);%PATH%"
 #!/bin/sh
 # $LauncherTag for $($tool.Name) ($dest)
 case "`${1:-}" in
-  self-update) shift; exec pwsh -NoProfile -File "$helper" update $($tool.Name) "`$@" ;;
-  self-uninstall|self-remove) shift; exec pwsh -NoProfile -File "$helper" uninstall $($tool.Name) "`$@" ;;
+  self-update) shift; exec pwsh -NoProfile -File "$helper" update $($tool.Name) $scopeFlag "`$@" ;;
+  self-uninstall|self-remove) shift; exec pwsh -NoProfile -File "$helper" uninstall $($tool.Name) $scopeFlag "`$@" ;;
 esac
 PATH="$($env_.VenvBin):`$PATH"; export PATH
 exec "$($env_.Py)" "$entry" "`$@"
@@ -199,15 +200,31 @@ function Save-Meta([string]$dest, $meta) {
     $meta | ConvertTo-Json | Set-Content -Path (Join-Path $dest '.grimoire.json') -Encoding UTF8
 }
 
-function Find-Install($tool, [string]$customDir) {
+function Get-Installs($tool, [string]$customDir) {
     $dirs = @()
     if ($customDir) { $dirs += (Join-Path $customDir $tool.Name) }
     $dirs += (Join-Path $LocalRoot $tool.Name), (Join-Path $SystemRoot $tool.Name)
+    $found = @()
     foreach ($d in $dirs) {
         $m = Join-Path $d '.grimoire.json'
-        if (Test-Path $m) { return @{ Dest = $d; Meta = (Get-Content $m -Raw | ConvertFrom-Json) } }
+        if (Test-Path $m) { $found += , @{ Dest = $d; Meta = (Get-Content $m -Raw | ConvertFrom-Json) } }
     }
-    return $null
+    return , $found
+}
+
+# Picks one install; $scope = 'local' | 'system' | '' (first found, warns if several).
+function Find-Install($tool, [string]$customDir, [string]$scope) {
+    $all = Get-Installs $tool $customDir
+    if ($scope) { $all = @($all | Where-Object { $_.Meta.scope -eq $scope }) }
+    if ($all.Count -eq 0) { return $null }
+    if ($all.Count -gt 1) { Warn "$($tool.Name) is installed in several places; using $($all[0].Dest) (pass --system or --local)" }
+    return $all[0]
+}
+
+function Get-Scope($o) {
+    if ($o.system) { return 'system' }
+    if ($o.local) { return 'local' }
+    return ''
 }
 
 function Read-Options([string[]]$rest, [string[]]$withValue) {
@@ -240,7 +257,7 @@ function Invoke-Install([string]$name, [string[]]$rest) {
     }
     Get-Source $tool $ref $dest
     $env_ = Initialize-Python $tool $dest
-    $launcher = Write-Launcher $tool $bin $dest $env_
+    $launcher = Write-Launcher $tool $bin $dest $env_ $scope
     Save-Meta $dest @{ tool = $tool.Name; ref = $ref; scope = $scope; bin = $bin; launcher = $launcher; python = $env_.Py; venv_bin = $env_.VenvBin; installed_at = (Get-Date).ToUniversalTime().ToString('s') + 'Z' }
     Add-ToPath $bin $scope
     Ok "installed $($tool.Name) -> $launcher  (files in $dest)"
@@ -251,20 +268,20 @@ function Invoke-Update([string]$name, [string[]]$rest) {
     if ($name -eq 'all') {
         $found = $false
         foreach ($t in $Tools.Keys) {
-            if (Find-Install (Get-Tool $t) $o.dir) { $found = $true; Invoke-Update $t $rest }
+            foreach ($i in (Get-Installs (Get-Tool $t) $o.dir)) { $found = $true; Invoke-Update $t @('--' + $i.Meta.scope) }
         }
         if (-not $found) { Warn 'nothing installed' }
         return
     }
     $tool = Get-Tool $name
-    $inst = Find-Install $tool $o.dir
+    $inst = Find-Install $tool $o.dir (Get-Scope $o)
     if (-not $inst) { Fail "$($tool.Name) is not installed (use: install $($tool.Name))" }
     $m = $inst.Meta
     if ($m.scope -eq 'system' -and -not (Test-Admin)) { Fail 'updating a system install needs an elevated shell' }
     $ref = if ($o.ref) { $o.ref } else { $m.ref }
     Get-Source $tool $ref $inst.Dest
     $env_ = Initialize-Python $tool $inst.Dest
-    $launcher = Write-Launcher $tool $m.bin $inst.Dest $env_
+    $launcher = Write-Launcher $tool $m.bin $inst.Dest $env_ $m.scope
     Save-Meta $inst.Dest @{ tool = $tool.Name; ref = $ref; scope = $m.scope; bin = $m.bin; launcher = $launcher; python = $env_.Py; venv_bin = $env_.VenvBin; installed_at = (Get-Date).ToUniversalTime().ToString('s') + 'Z' }
     Ok "updated $($tool.Name) ($($inst.Dest), ref $ref)"
 }
@@ -272,11 +289,13 @@ function Invoke-Update([string]$name, [string[]]$rest) {
 function Invoke-Uninstall([string]$name, [string[]]$rest) {
     $o = Read-Options $rest @('dir')
     if ($name -eq 'all') {
-        foreach ($t in $Tools.Keys) { if (Find-Install (Get-Tool $t) $o.dir) { Invoke-Uninstall $t $rest } }
+        foreach ($t in $Tools.Keys) {
+            foreach ($i in (Get-Installs (Get-Tool $t) $o.dir)) { Invoke-Uninstall $t (@('--' + $i.Meta.scope) + $(if ($o.purge) { @('--purge') } else { @() })) }
+        }
         return
     }
     $tool = Get-Tool $name
-    $inst = Find-Install $tool $o.dir
+    $inst = Find-Install $tool $o.dir (Get-Scope $o)
     if (-not $inst) { Fail "$($tool.Name) is not installed" }
     $m = $inst.Meta
     if ($m.scope -eq 'system' -and -not (Test-Admin)) { Fail 'removing a system install needs an elevated shell' }
@@ -319,9 +338,9 @@ function Invoke-Run([string]$name, [string[]]$rest) {
 
 function Invoke-List {
     foreach ($t in $Tools.Keys) {
-        $inst = Find-Install (Get-Tool $t) $null
-        $where = if ($inst) { "$($inst.Dest) ($($inst.Meta.ref))" } else { '-' }
-        '{0,-12} {1,-28} {2}' -f $t, $Tools[$t].Dir, $where
+        $all = Get-Installs (Get-Tool $t) $null
+        if ($all.Count -eq 0) { '{0,-12} {1,-28} {2}' -f $t, $Tools[$t].Dir, '-' }
+        foreach ($i in $all) { '{0,-12} {1,-28} {2} ({3}, {4})' -f $t, $Tools[$t].Dir, $i.Dest, $i.Meta.scope, $i.Meta.ref }
     }
 }
 
