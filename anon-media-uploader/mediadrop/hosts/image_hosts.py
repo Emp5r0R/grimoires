@@ -7,7 +7,11 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
+from typing import Callable
+
+from yarl import URL
 
 from ..util import MiB, UploadError, parse_iso, snippet
 from .base import Host, UploadResult, check_http, form, nearest_choice, read_body, register
@@ -47,17 +51,21 @@ class CheveretoWeb(Host):
     """Chevereto-powered sites: fetch homepage for PHPSESSID + auth_token, POST /json."""
 
     images_only = True
+    cookies: dict[str, Callable[[], str]] = {}  # cookies a site normally sets with JavaScript
 
     def lifetime(self, size, opts):
         return opts.expire
 
     async def upload(self, net, c, payload, opts):
         via = c.proxy is not None
+        if self.cookies:
+            c.session.cookie_jar.update_cookies({k: make() for k, make in self.cookies.items()}, URL(self.site))
         async with c.get(self.site + "/", headers={"Accept": "text/html"}) as r:
             html = await read_body(r)
-            check_http(r.status, html, via, self.name)
+            status = r.status
         m = CHEVERETO_TOKEN_RE.search(html)
         if not m:
+            check_http(status, html, via, self.name)  # raises for blocks / errors
             raise UploadError(f"{self.name}: auth_token not found on page", proxy_fault=via)
         fields = {
             "type": "file", "action": "upload", "timestamp": str(int(time.time() * 1000)),
@@ -170,17 +178,20 @@ class Pixhost(Host):
 
 @register
 class ImgInTh(CheveretoWeb):
-    name, label, site = "imgin", "img.in.th", "https://img.in.th"
+    name, label, site = "imgin", "img.in.th", "https://www.img.in.th"
     max_size = 50 * MiB
-    domains = ("img.in.th",)
+    disabled = "uploads now require reCAPTCHA; set MEDIA_DROP_ENABLE_IMGIN=1 to try anyway"
+    domains = ("img.in.th", "www.img.in.th")
 
 
 @register
 class Lensdump(CheveretoWeb):
     name, label, site = "lensdump", "lensdump.com", "https://lensdump.com"
     max_size = 50 * MiB
-    notes = "Cloudflare-fronted; many free proxies get challenged"
+    notes = "Cloudflare-fronted"
+    disabled = "uploads now require Cloudflare Turnstile; set MEDIA_DROP_ENABLE_LENSDUMP=1 to try anyway"
     domains = ("lensdump.com", "i.lensdump.com")
+    cookies = {"ld_did": lambda: secrets.token_hex(16)}  # set by the site's JS check
 
 
 @register

@@ -255,9 +255,11 @@ def classify_exception(exc: BaseException, via_proxy: bool) -> UploadError:
         return UploadError(f"proxy refused CONNECT: {exc}", proxy_fault=True)
     if SOCKS_ERRORS and isinstance(exc, SOCKS_ERRORS):
         return UploadError(f"socks proxy error: {exc}", proxy_fault=True)
-    if isinstance(exc, (aiohttp.ClientError, OSError, ssl.SSLError)):
+    if isinstance(exc, (aiohttp.ClientError, OSError, ssl.SSLError, EOFError, ConnectionError)):
         name = type(exc).__name__
         return UploadError(f"{name}: {exc}".strip(), proxy_fault=via_proxy)
     if isinstance(exc, (ValueError, KeyError, TypeError)):
         return UploadError(f"unexpected response ({type(exc).__name__}: {exc})", proxy_fault=via_proxy)
+    if via_proxy:  # broken free proxies fail in odd ways; try another one
+        return UploadError(f"{type(exc).__name__}: {exc}", proxy_fault=True)
     return UploadError(f"{type(exc).__name__}: {exc}", fatal=True)

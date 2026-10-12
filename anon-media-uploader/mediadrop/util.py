@@ -123,9 +123,21 @@ def atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def looks_blocked(text: str) -> bool:
+# Markers that only appear on an actual challenge page (safe to test on HTTP 200 pages).
+CHALLENGE_MARKERS = ("cf-chl", "Just a moment...", "Attention Required!", "cf-browser-verification", "/cdn-cgi/challenge-platform/h/")
+DISABLED_MARKERS = ("uploads disabled", "uploading is disabled", "uploads are disabled", "uploads are currently disabled")
+
+
+def looks_blocked(text: str, strict: bool = False) -> bool:
+    """strict=True: only real challenge pages (for 2xx); otherwise any block hint."""
     head = text[:6000].lower()
-    return any(marker.lower() in head for marker in BLOCK_MARKERS)
+    markers = CHALLENGE_MARKERS if strict else BLOCK_MARKERS + CHALLENGE_MARKERS
+    return any(marker.lower() in head for marker in markers)
+
+
+def uploads_disabled(text: str) -> bool:
+    head = text[:2000].lower()
+    return any(m in head for m in DISABLED_MARKERS)
 
 
 def snippet(text: str, n: int = 160) -> str:

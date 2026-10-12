@@ -18,7 +18,7 @@ try:
 except ImportError:
     aiohttp = None  # type: ignore
 
-from ..util import MiB, UploadError, human_size, looks_blocked, now_utc, snippet
+from ..util import MiB, UploadError, human_size, looks_blocked, now_utc, snippet, uploads_disabled
 
 if TYPE_CHECKING:
     from ..media import Payload
@@ -55,6 +55,8 @@ class Host:
     temporary = False
     retention = "permanent"
     env_key: Optional[str] = None  # host is only usable when this env var is set
+    disabled: Optional[str] = None  # reason, when the site currently refuses uploads
+    upload_ua: Optional[str] = None  # fixed User-Agent for uploads (some APIs reject browsers)
     notes = ""
     check_ua: Optional[str] = None
     download_method = "GET"
@@ -63,6 +65,8 @@ class Host:
     # -- capability / policy -------------------------------------------------
 
     def available(self) -> tuple[bool, str]:
+        if self.disabled and not os.environ.get(f"MEDIA_DROP_ENABLE_{self.name.upper()}"):
+            return False, f"disabled: {self.disabled}"
         if self.env_key and not os.environ.get(self.env_key):
             return False, f"set {self.env_key}"
         return True, ""
@@ -129,13 +133,17 @@ async def read_body(resp: "aiohttp.ClientResponse", limit: int = 4 * MiB) -> str
 
 
 def check_http(status: int, text: str, via_proxy: bool, host: str) -> None:
-    if 200 <= status < 300 and not (via_proxy and looks_blocked(text) and "<html" in text[:500].lower()):
+    if 200 <= status < 300 and not (looks_blocked(text, strict=True) and "<html" in text[:500].lower()):
         return
     detail = snippet(text)
+    if uploads_disabled(text):
+        raise UploadError(f"{host}: the site has disabled uploads ({detail})", fatal=True)
     if status == 407:
         raise UploadError("proxy requires authentication", proxy_fault=True)
     if status == 413:
         raise UploadError(f"{host}: file too large (HTTP 413)", fatal=True)
+    if status in (401, 412) and via_proxy:  # e.g. catbox "Invalid uploader": the proxy IP is banned
+        raise UploadError(f"{host}: refused this IP (HTTP {status}) {detail}", proxy_fault=True)
     if looks_blocked(text) or status in (403, 429, 503, 520, 521, 522, 523, 524, 525, 526):
         raise UploadError(f"{host}: blocked/rate-limited (HTTP {status}) {detail}", proxy_fault=via_proxy)
     if status >= 500:
