@@ -265,7 +265,8 @@ def build_payload(path: Path, *, strip: bool = False, keep_name: bool = False, h
             original = {**file_hashes(raw), "size": len(raw), "mime": mime}
             transforms.append("strip-metadata")
             data = stripped
-    ext = MIME_EXT.get(mime) or path.suffix.lstrip(".").lower() or "bin"
+    ext = (MIME_EXT.get(mime) or path.suffix.lstrip(".").lower()
+           or (mimetypes.guess_extension(mime) or "").lstrip(".") or ("txt" if mime.startswith("text/") else "bin"))
     if keep_name:
         name = path.name if path.suffix else f"{path.name}.{ext}"
     else:

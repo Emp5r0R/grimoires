@@ -29,8 +29,10 @@ Manual: `pip install -r requirements.txt` then `python media_drop.py ...`
 
 ## Features
 
-- Images: catbox, imgbb, freeimage, pixhost, img.in.th, lensdump, imgur (key)
-- Files: catbox, pomf.lain.la, qu.ax, gofile, 0x0.st, x0.at, paste.c-net.org, pixeldrain (key), litterbox, temp.sh, tmpfile.link, filebin, uguu, tmpfiles
+- Images: imgbb, freeimage, pixhost, imgur (key) + every file host below
+- Files (permanent): catbox, pomf.lain.la, qu.ax, gofile, vikingfile, x0.at, paste.c-net.org, pixeldrain (key)
+- Files (temporary): litterbox, transfer.adminforge.de, transfer.notkiska.pw, transfer.whalebone.io, temp.sh, tmpfile.link, filebin, sendit.sh, uguu, tmpfiles
+- Paused by the sites themselves (kept, off by default): 0x0.st, img.in.th, lensdump - `media-drop hosts` shows why
 - Hosts picked by file size and how long you want it kept (permanent / temporary / min-max life)
 - Free proxies from ~30 public lists, validated before use (TLS always verified, IP-leak check), or Tor / your own proxy
 - Pictures get a new hash on every host by default (file stays valid); `restore` gets the original back

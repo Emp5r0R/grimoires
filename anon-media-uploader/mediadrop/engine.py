@@ -57,7 +57,8 @@ class Engine:
     async def upload(self, host: Host, payload: Payload, opts: UploadOptions) -> tuple[UploadResult, str]:
         # Free proxies are slow: allow ~64 KiB/s on top of the base timeout.
         total = self.net.timeout + payload.size / (64 * 1024)
-        return await self.attempts(f"[{host.name}] {payload.path.name}", lambda c: host.upload(self.net, c, payload, opts), total=total)
+        return await self.attempts(f"[{host.name}] {payload.path.name}", lambda c: host.upload(self.net, c, payload, opts),
+                                   total=total, ua=host.upload_ua)
 
     async def fetch(self, url: str, *, max_bytes: int, quick: bool, host: Optional[Host], label: str,
                     method: Optional[str] = None, follow: bool = True) -> tuple[FetchOutcome, str]:

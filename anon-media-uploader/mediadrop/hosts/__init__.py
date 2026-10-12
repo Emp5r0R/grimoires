@@ -14,8 +14,8 @@ _REGISTERED_BY_IMPORT = (file_hosts, image_hosts)
 # Default failover order (most reliable / longest-lived first).
 ORDER = [
     "catbox", "imgbb", "freeimage", "pixhost", "imgin", "lain", "quax", "x0", "0x0", "cnet",
-    "gofile", "lensdump", "imgur", "pixeldrain",
-    "litterbox", "tempsh", "tmpfilelink", "filebin", "uguu", "tmpfiles",
+    "gofile", "viking", "lensdump", "imgur", "pixeldrain",
+    "litterbox", "adminforge", "notkiska", "whalebone", "tempsh", "tmpfilelink", "filebin", "sendit", "uguu", "tmpfiles",
 ]
 HOSTS: dict[str, Host] = {n: REGISTRY[n] for n in ORDER if n in REGISTRY}
 HOSTS.update({n: h for n, h in REGISTRY.items() if n not in HOSTS})

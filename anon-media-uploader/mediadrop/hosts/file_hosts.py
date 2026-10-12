@@ -14,6 +14,7 @@ from .base import Host, UploadResult, check_http, form, nearest_choice, read_bod
 
 GiB = 1024 * MiB
 DAY = dt.timedelta(days=1)
+CURL_UA = "curl/8.10.1"
 
 
 @register
@@ -55,6 +56,7 @@ class ZeroX0(Host):
     max_size = 512 * MiB
     retention = "30d-1y by size (--expire to shorten)"
     notes = "blocks many VPN/proxy ranges; returns a delete token"
+    disabled = "0x0.st paused uploads (spam); set MEDIA_DROP_ENABLE_0X0=1 to try anyway"
     domains = ("0x0.st",)
 
     def lifetime(self, size, opts):
@@ -144,6 +146,14 @@ class QuAx(Pomf):
         days = int(self._days(opts))
         return dt.timedelta(days=days) if days > 0 else None
 
+    async def upload(self, net, c, payload, opts):
+        res = await super().upload(net, c, payload, opts)
+        m = re.match(r"^https://qu\.ax/([A-Za-z0-9]+)$", res.url)
+        if m and payload.mime.split("/")[0] in ("image", "video", "audio"):  # media is served raw under /x/
+            ext = payload.upload_name.rsplit(".", 1)[-1] if "." in payload.upload_name else ""
+            res.page_url, res.url = res.url, f"https://qu.ax/x/{m.group(1)}" + (f".{ext}" if ext else "")
+        return res
+
 
 @register
 class Gofile(Host):
@@ -187,6 +197,8 @@ class CNetPaste(Host):
     name, label, site = "cnet", "paste.c-net.org", "https://paste.c-net.org"
     max_size = 50 * 1000 * 1000
     retention = "180d, renewed on every access"
+    upload_ua = CURL_UA  # browser user-agents get a misleading HTTP 413
+    check_ua = CURL_UA
     domains = ("paste.c-net.org",)
 
     def lifetime(self, size, opts):
@@ -218,7 +230,111 @@ class Pixeldrain(Host):
         return UploadResult(self.name, f"https://pixeldrain.com/api/file/{fid}", page_url=f"https://pixeldrain.com/u/{fid}")
 
 
+@register
+class VikingFile(Host):
+    name, label, site = "viking", "vikingfile.com", "https://vikingfile.com"
+    retention = "no fixed expiry"
+    notes = "page link; check reads the page for 'File not found'"
+    domains = ("vikingfile.com", "vik1ngfile.site")
+
+    async def upload(self, net, c, payload, opts):
+        async with c.get("https://vikingfile.com/api/get-server", headers={"Accept": "application/json"}) as r:
+            text = await read_body(r)
+            check_http(r.status, text, c.proxy is not None, self.name)
+        server = json.loads(text).get("server")
+        if not server or not server.startswith("https://"):
+            raise UploadError(f"viking: no upload server ({snippet(text)})", proxy_fault=c.proxy is not None)
+        async with c.post(server, data=form("file", payload, {"user": ""})) as r:
+            text = await read_body(r)
+            check_http(r.status, text, c.proxy is not None, self.name)
+        d = json.loads(text)
+        if not d.get("url"):
+            raise UploadError(f"viking: {snippet(text)}", fatal=True)
+        return UploadResult(self.name, d["url"], extra={"hash": d.get("hash")})
+
+    def interpret(self, rec, out):
+        if out.http_status == 404 or "File not found" in out.head_text:
+            return "removed", "vikingfile says 'File not found'"
+        if out.http_status == 200:
+            return "alive", "file page exists (downloads go through the page)"
+        return None
+
+
 # -- temporary -------------------------------------------------------------------
+
+
+class TransferSh(Host):
+    """transfer.sh servers: PUT /<name>, X-Url-Delete header, Max-Days for expiry."""
+
+    endpoint = ""
+    max_size = 10 * GiB
+    temporary = True
+    retention = "~14 days (server default; --expire sets Max-Days)"
+    upload_ua = CURL_UA
+    check_ua = CURL_UA
+
+    def lifetime(self, size, opts):
+        if opts.expire:
+            return dt.timedelta(days=max(1, round(opts.expire.total_seconds() / 86400)))
+        return 14 * DAY
+
+    async def upload(self, net, c, payload, opts):
+        headers = {"Content-Type": payload.mime}
+        if opts.expire:
+            headers["Max-Days"] = str(max(1, round(opts.expire.total_seconds() / 86400)))
+        url, resp_headers = await text_upload(c, self.name, "PUT", f"{self.endpoint}/{urllib.parse.quote(payload.upload_name)}",
+                                              data=payload.data, headers=headers)
+        direct = url.replace(self.endpoint + "/", self.endpoint + "/get/", 1)  # /get/ always serves the raw file
+        delete = resp_headers.get("X-Url-Delete")
+        return UploadResult(self.name, direct, page_url=url, delete_url=delete,
+                            manage_note=f"curl -X DELETE {delete}" if delete else None, expires_at=self.expiry(payload, opts))
+
+
+@register
+class TransferAdminforge(TransferSh):
+    name, label, site = "adminforge", "transfer.adminforge.de", "https://transfer.adminforge.de"
+    endpoint = site
+    domains = ("transfer.adminforge.de",)
+
+
+@register
+class TransferNotkiska(TransferSh):
+    name, label, site = "notkiska", "transfer.notkiska.pw", "https://transfer.notkiska.pw"
+    endpoint = site
+    domains = ("transfer.notkiska.pw",)
+
+
+@register
+class TransferWhalebone(TransferSh):
+    name, label, site = "whalebone", "transfer.whalebone.io", "https://transfer.whalebone.io"
+    endpoint = site
+    domains = ("transfer.whalebone.io",)
+
+
+@register
+class SendIt(Host):
+    name, label, site = "sendit", "sendit.sh", "https://sendit.sh"
+    temporary = True
+    retention = "short-lived (not published; ~1 day assumed)"
+    upload_ua = CURL_UA
+    check_ua = CURL_UA
+    domains = ("sendit.sh",)
+    URL_RE = re.compile(r"https://sendit\.sh/[A-Za-z0-9]+/\S+")
+
+    def lifetime(self, size, opts):
+        return DAY
+
+    async def upload(self, net, c, payload, opts):
+        async with c.post(f"https://sendit.sh/{urllib.parse.quote(payload.upload_name)}", data=payload.data,
+                          headers={"Content-Type": "application/octet-stream"}) as r:
+            text = await read_body(r)
+            check_http(r.status, text, c.proxy is not None, self.name)
+        m = self.URL_RE.search(text)
+        if not m:
+            raise UploadError(f"sendit: {snippet(text)}", proxy_fault=c.proxy is not None)
+        return UploadResult(self.name, m.group(0), expires_at=self.expiry(payload, opts))
+
+
 
 
 @register

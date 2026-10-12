@@ -27,6 +27,7 @@ class FetchOutcome:
     dhash: Optional[str]
     truncated: bool
     location: Optional[str] = None
+    head_text: str = ""  # start of the body for HTML/text responses (soft-404 detection)
 
 
 async def fetch_and_hash(c: Client, url: str, *, max_bytes: int, quick: bool, ua: Optional[str] = None,
@@ -65,7 +66,8 @@ async def fetch_and_hash(c: Client, url: str, *, max_bytes: int, quick: bool, ua
                 dh = dhash(bytes(keep))
         if ctype in ("", "application/octet-stream") and keep:
             ctype = sniff_mime(bytes(keep[:2048]))
-        return FetchOutcome(r.status, str(r.url), ctype, size, hashes, dh, truncated, r.headers.get("Location"))
+        head_text = bytes(keep[:65536]).decode("utf-8", "replace") if ctype.startswith("text/") or "html" in ctype else ""
+        return FetchOutcome(r.status, str(r.url), ctype, size, hashes, dh, truncated, r.headers.get("Location"), head_text)
 
 
 def classify(rec: dict[str, Any], out: FetchOutcome, host: Optional[Host], dh_threshold: int) -> tuple[str, str]:
@@ -94,7 +96,7 @@ def classify(rec: dict[str, Any], out: FetchOutcome, host: Optional[Host], dh_th
     if final_path in ("", "/") and urllib.parse.urlsplit(rec.get("url", "")).path not in ("", "/"):
         return gone, "redirected to homepage"
     is_html = out.content_type in ("text/html", "application/xhtml+xml")
-    if is_html and not expected_mime.startswith("text/"):
+    if is_html and expected_mime not in ("text/html", "application/xhtml+xml"):
         return "alive", "page reachable but serves HTML (not the raw file); content not verified"
     if out.truncated:
         return "alive", f"larger than --max-download; content not verified ({human_size(out.size)}+)"
